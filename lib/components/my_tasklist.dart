@@ -1,34 +1,44 @@
-
-
-
 import 'package:flutter/material.dart';
+
 
 class TaskListCard extends StatefulWidget {
   const TaskListCard({
     super.key,
     required this.theme,
+    required this.name,
+    required this.hour,
+    required this.isChecked,
+    required this.saveChecked,
+
   });
 
   final ThemeData theme;
+  final String name;
+  final String hour;
+  final bool isChecked;
+  final Function() saveChecked;
+
 
   @override
   State<TaskListCard> createState() => _TaskListCardState();
 }
 
 class _TaskListCardState extends State<TaskListCard> {
+  late bool _isChecked;
 
-
-  bool _isChecked = false;
-  bool _isTask = true;
+  @override
+  void initState() {
+    super.initState();
+    _isChecked = widget.isChecked;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Container(
       width: double.infinity,
       height: 90,
-      padding: const EdgeInsets.all( 13),
-      margin: const EdgeInsets.only(bottom: 13,left: 5,right: 5),
+      padding: const EdgeInsets.all(13),
+      margin: const EdgeInsets.only(bottom: 13, left: 5, right: 5),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(
@@ -39,18 +49,20 @@ class _TaskListCardState extends State<TaskListCard> {
       ),
       child: Row(
         children: [
-          Icon(_isTask ? Icons.checklist_outlined : Icons.call_outlined),
-          const SizedBox(width: 10,),
-
+          Icon(Icons.checklist_outlined),
+          const SizedBox(width: 10),
 
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text("Завдання",
+              Text(
+                widget.name,
                 style: TextStyle(
                   decoration: _isChecked ? TextDecoration.lineThrough : TextDecoration.none,
-                ),),
-              const Text("година",
+                ),
+              ),
+              Text(
+                widget.hour,
                 style: TextStyle(
                   color: Colors.grey,
                 ),
@@ -58,19 +70,19 @@ class _TaskListCardState extends State<TaskListCard> {
             ],
           ),
           const Spacer(),
-          Checkbox(value: _isChecked,
-            checkColor:Colors.white ,
+          Checkbox(
+            value: _isChecked,
+            checkColor: Colors.white,
             activeColor: _isChecked ? const Color.fromRGBO(30, 76, 168, 1.0) : null,
             side: BorderSide(
-              color:Colors.grey.shade900 ,
+              color: Colors.grey.shade900,
               width: 2,
             ),
-            onChanged:(bool? value){
-              setState((){
+            onChanged: (bool? value) {
+              setState(() {
                 _isChecked = value!;
-
+                widget.saveChecked();
               });
-
             },
           ),
         ],

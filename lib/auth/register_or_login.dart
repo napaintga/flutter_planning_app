@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
-import 'package:untitled/pages/register_page.dart';
+import 'package:flutter/material.dart' show BuildContext, State, StatefulWidget, Widget;
+import 'package:proecfxd/pages/register_page.dart';
 
 import '../pages/login_page.dart';
 
@@ -17,7 +17,6 @@ class LoginOrRegister extends StatefulWidget{
 }
 class _LoginOrRegisterState extends State<LoginOrRegister>{
   bool show_login_page = true;
-  bool _isLogin = false;
 
 
   void toggle_pages(){
