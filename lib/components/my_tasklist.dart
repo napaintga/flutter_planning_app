@@ -40,7 +40,7 @@ class _TaskListCardState extends State<TaskListCard> {
       padding: const EdgeInsets.all(13),
       margin: const EdgeInsets.only(bottom: 13, left: 5, right: 5),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isChecked ? Colors.grey.shade200 : Colors.white,
         border: Border.all(
           color: Colors.grey.shade600,
           width: 1,

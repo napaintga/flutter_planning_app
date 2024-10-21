@@ -1,13 +1,17 @@
-import 'dart:io';
 import 'dart:convert';
-import 'dart:math'; // For Random.secure()
-import 'dart:typed_data'; // Import for Uint8List
+import 'dart:math';
+import 'dart:typed_data';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:pointycastle/export.dart' as pc;
 import 'package:path_provider/path_provider.dart';
-
-import '../components/my_textfield.dart';
+import 'package:cryptography/cryptography.dart';
 import '../components/my_button.dart';
+import '../components/my_textfield.dart';
+import 'package:base_x/base_x.dart';
+import 'package:pointycastle/export.dart' as pc;
+
+
+
 
 class RegisterPage extends StatefulWidget {
   final void Function()? onTap;
@@ -19,14 +23,14 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  final TextEditingController _emailcontroller = TextEditingController();
+  final TextEditingController _usernamecontroller = TextEditingController();
   final TextEditingController _passwordcontroller = TextEditingController();
   final TextEditingController _confirmpasswordcontroller = TextEditingController();
 
   bool _isValid = false;
   String _errorMessage = '';
+  String _recoveryPhrase = '';
 
-  // Password validation method
   bool _validatePassword(String password, String confirmpassword) {
     _errorMessage = '';
 
@@ -49,34 +53,190 @@ class _RegisterPageState extends State<RegisterPage> {
     return _errorMessage.isEmpty;
   }
 
-  // RSA Key generation method
-  pc.AsymmetricKeyPair<pc.RSAPublicKey, pc.RSAPrivateKey> _generateKeyPair() {
-    final keyParams = pc.RSAKeyGeneratorParameters(BigInt.from(65537), 2048, 12);
-    final secureRandom = pc.FortunaRandom();
-    final random = Random.secure();
-    final seeds = List<int>.generate(32, (_) => random.nextInt(256));
-    secureRandom.seed(pc.KeyParameter(Uint8List.fromList(seeds)));
 
-    final keyGen = pc.RSAKeyGenerator()
-      ..init(pc.ParametersWithRandom(keyParams, secureRandom));
 
-    final pair = keyGen.generateKeyPair();
-    return pc.AsymmetricKeyPair<pc.RSAPublicKey, pc.RSAPrivateKey>(
-      pair.publicKey as pc.RSAPublicKey,
-      pair.privateKey as pc.RSAPrivateKey,
+
+  Future<String> _generateKey(String password) async {
+    final algorithm = Ed25519();
+
+    // Генерація ключової пари
+    final keyPair = await algorithm.newKeyPair();
+    final privateKey = await keyPair.extractPrivateKeyBytes();
+    final publicKey = await keyPair.extractPublicKey();
+
+    const PREFIX = "ed25519:";
+
+    // Ініціалізація алфавіту Base58
+    final base58Codec = BaseXCodec('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz');
+
+    // Кодування приватного та публічного ключів
+    final privateKeyBase58 = PREFIX + base58Codec.encode(Uint8List.fromList(privateKey));
+    final publicKeyBase58 = PREFIX + base58Codec.encode(Uint8List.fromList(publicKey.bytes));
+
+    print("Private Key: $privateKeyBase58");
+    print("Public Key: $publicKeyBase58");
+
+    // Параметри для PBKDF2
+    const int iterationCount = 65536;
+    const int keyLength = 32;
+    const int saltLength = 16;
+    const int ivLength = 12;
+
+    // Генеруємо сіль
+    final salt = Uint8List.fromList(List<int>.generate(saltLength, (i) => Random.secure().nextInt(256)));
+
+    // Ініціалізація алгоритму PBKDF2 з HMAC SHA256
+    final pbkdf2 = Pbkdf2(
+      macAlgorithm: Hmac.sha256(),
+      iterations: iterationCount,
+      bits: keyLength * 8, // Бітова довжина
     );
+
+    // Хешування пароля
+    final secretKey = await pbkdf2.deriveKey(
+      secretKey: SecretKey(utf8.encode(password)),
+      nonce: salt, // сіль використовується як nonce
+    );
+
+    // Отримуємо байти хешу
+    final passwordHash = await secretKey.extractBytes();
+
+    // Виводимо результати
+    print('Salt: ${base64.encode(salt)}');
+    print('Password Hash: ${base64.encode(passwordHash)}');
+
+    // Генеруємо випадковий nonce (IV)
+    final nonce = Uint8List.fromList(List<int>.generate(ivLength, (i) => Random.secure().nextInt(256)));
+
+    // Ініціалізація шифру AES GCM
+    final cipher = pc.GCMBlockCipher(pc.AESEngine())
+      ..init(true, pc.AEADParameters(pc.KeyParameter(Uint8List.fromList(passwordHash)), 128, nonce, Uint8List(0)));
+
+    // Шифрування даних
+    final plaintext = utf8.encode(privateKeyBase58);
+    final encryptedData = cipher.process(Uint8List.fromList(plaintext));
+
+    // Генеруємо тег (tag)
+    final tag = cipher.mac;
+
+    // Комбінуємо nonce, salt, encrypted data та tag для передачі
+    final encryptedBytes = Uint8List.fromList(nonce + salt + encryptedData + tag);
+
+    // Закодуємо в Base64 для зберігання або передачі
+    final encodedData = base64Encode(encryptedBytes);
+
+    print('Зашифровані дані: $encodedData');
+
+    return encodedData;
+  }
+  // Future<String?> _decryptKey(String encodedData, String password) async {
+  //   // Декодуємо дані з Base64
+  //   final encryptedBytes = base64Decode(encodedData);
+  //
+  //   // Витягуємо nonce, salt, encrypted data та tag
+  //   final nonce = encryptedBytes.sublist(0, 12); // перші 12 байтів
+  //   final salt = encryptedBytes.sublist(12, 28); // наступні 16 байтів
+  //   final encryptedData = encryptedBytes.sublist(28, encryptedBytes.length - 16); // дані між nonce та тегом
+  //   final tag = encryptedBytes.sublist(encryptedBytes.length - 16); // останні 16 байтів
+  //
+  //   // Параметри для PBKDF2
+  //   const int iterationCount = 65536;
+  //   const int keyLength = 32;
+  //
+  //   // Ініціалізація алгоритму PBKDF2 з HMAC SHA256
+  //   final pbkdf2 = Pbkdf2(
+  //     macAlgorithm: Hmac.sha256(),
+  //     iterations: iterationCount,
+  //     bits: keyLength * 8, // Бітова довжина
+  //   );
+  //
+  //   // Хешування пароля з використанням сіль
+  //   final secretKey = await pbkdf2.deriveKey(
+  //     secretKey: SecretKey(utf8.encode(password)),
+  //     nonce: salt, // сіль використовується як nonce
+  //   );
+  //
+  //   // Отримуємо байти хешу
+  //   final passwordHash = await secretKey.extractBytes();
+  //
+  //   // Ініціалізація шифру AES GCM для розшифрування
+  //   final cipher = pc.GCMBlockCipher(pc.AESEngine())
+  //     ..init(false, pc.AEADParameters(pc.KeyParameter(Uint8List.fromList(passwordHash)), 128, nonce, Uint8List(0)));
+  //
+  //   // Розшифрування даних
+  //   final decryptedData = cipher.process(Uint8List.fromList(encryptedData));
+  //
+  //   // Перетворюємо байти назад в рядок
+  //   final decryptedKey = utf8.decode(decryptedData);
+  //
+  //   // Повертаємо розшифрований приватний ключ
+  //   return decryptedKey;
+  // }
+
+
+  String _generateRecoveryPhrase() {
+    final random = Random.secure();
+    const wordList = [
+      'apple', 'orange', 'banana', 'grape', 'lemon', 'mango', 'peach', 'pear',
+      'plum', 'berry', 'melon', 'kiwi', 'cherry', 'fig', 'date', 'apricot',
+      'lime', 'coconut', 'blueberry', 'raspberry'
+    ];
+    List<String> phrase = [];
+    for (int i = 0; i < 12; i++) {
+      phrase.add(wordList[random.nextInt(wordList.length)]);
+    }
+    return phrase.join(' ');
   }
 
-  Future<void> _saveKeys(String publicKey, String privateKey, String username) async {
+  Future<void> _saveKeys(String encryptedPrivateKey ) async {
+
+
+    // String encodedData = await _generateKey('mytestpassword');
+    // String? decryptedKey = await _decryptKey(encodedData, 'mytestpassword');
+    //
+    // if (decryptedKey != null) {
+    //   print('Розшифрований ключ: $decryptedKey');
+    // } else {
+    //   print('Не вдалося розшифрувати ключ.');
+    // }
     final directory = await getApplicationDocumentsDirectory();
+    final username = _usernamecontroller.text;
 
-    final publicKeyFile = File('${directory.path}/$username-public_key.txt');
-    final privateKeyFile = File('${directory.path}/$username-private_key.txt');
+    final filePath = '${directory.path}/${username}_keys.json';
+    final file = File(filePath);
+    print(filePath);
+    final jsonContent = jsonEncode({
+      "username": _usernamecontroller.text,
+      "privateKey": encryptedPrivateKey,
+      "recoveryPhrase": _recoveryPhrase,
+      "pas":_passwordcontroller.text,
+    });
 
-    await publicKeyFile.writeAsString(publicKey);
-    await privateKeyFile.writeAsString(privateKey);
+    await file.writeAsString(jsonContent);
+  }
 
-    print("Keys saved successfully to ${directory.path}");
+
+
+
+  void _showRecoveryDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Recovery Phrase"),
+        content: Text(
+          "Please save the following recovery phrase in a safe place:\n\n$_recoveryPhrase",
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: const Text("Okay"),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -98,9 +258,9 @@ class _RegisterPageState extends State<RegisterPage> {
                     ),
                     const SizedBox(height: 50),
                     MyTextfield(
-                      hintText: "EMAIL",
+                      hintText: "USER NAME",
                       icon: const Icon(Icons.mail_outline),
-                      controller: _emailcontroller,
+                      controller: _usernamecontroller,
                       obsecureText: false,
                     ),
                     const SizedBox(height: 15),
@@ -142,54 +302,63 @@ class _RegisterPageState extends State<RegisterPage> {
                       ],
                     ),
                     const SizedBox(height: 30),
-                    MyButton(
-                      text: " REGISTER",
-                      onPressed: () {
-                        setState(() {
-                          _isValid = _validatePassword(
-                              _passwordcontroller.text, _confirmpasswordcontroller.text);
+// Assuming you have a method to generate or retrieve the publicKey
 
-                          if (_isValid) {
-                            final keyPair = _generateKeyPair();
+                MyButton(
+                text: "REGISTER",
+                onPressed: () async { // Mark the callback as async
+                  setState(() {
+                    _isValid = _validatePassword(
+                        _passwordcontroller.text,
+                        _confirmpasswordcontroller.text
+                    );
+                  });
 
-                            final publicKey = keyPair.publicKey.toString();
-                            final privateKey = keyPair.privateKey.toString();
+                  if (_isValid) {
+                    _recoveryPhrase = _generateRecoveryPhrase();
+                    _showRecoveryDialog(context);
+                    final password = _passwordcontroller.text;
 
-                            _saveKeys(publicKey, privateKey, _emailcontroller.text.split('@')[0])
-                                .then((_) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text("Keys generated and saved successfully!")),
-                              );
-                            }).catchError((e) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text("Failed to save keys: $e")),
-                              );
-                            });
-                          }
-                        });
-                      },
-                    ),
+                    try {
+                      final privateKey = await _generateKey(password);
+
+                      _saveKeys(privateKey);
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Keys and recovery phrase saved successfully!")),
+                      );
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Failed to save keys: $e")),
+                      );
+                    }
+                  }
+                },
+              ),
+
+
                     const SizedBox(height: 30),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Text("Already have an account? "),
+                        const Text("Already have an account?"),
+                        const SizedBox(width: 4),
                         GestureDetector(
                           onTap: widget.onTap,
                           child: const Text(
                             "Login now",
                             style: TextStyle(
+                              color: Colors.blue,
                               fontWeight: FontWeight.bold,
-                              color: Color.fromRGBO(73, 102, 151, 1.0),
                             ),
                           ),
-                        ),
+                        )
                       ],
-                    ),
+                    )
                   ],
                 ),
-              ),
+              )
             ],
           ),
         ),
@@ -197,3 +366,4 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 }
+
