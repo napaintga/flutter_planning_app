@@ -3,6 +3,25 @@
 import 'package:flutter/material.dart';
 
 import '../auth/register_or_login.dart';
+import 'package:http/http.dart' as http;
+
+Future<void> sendTransaction() async {
+  final response = await http.post(
+    Uri.parse('https://your-backend-url.com/sendTransaction'),
+    body: {
+      'accountId': 'your-account-id',
+      'contractId': 'your-contract-id',
+      'method': 'your-method-name',
+      'args': {'key': 'value'},
+    },
+  );
+
+  if (response.statusCode == 200) {
+    print('Transaction successful');
+  } else {
+    print('Transaction failed');
+  }
+}
 
 class MyBottomAppBar extends StatelessWidget {
 
@@ -33,7 +52,7 @@ class MyBottomAppBar extends StatelessWidget {
           IconButton(
             tooltip: 'theme',
             icon: const Icon(Icons.brightness_6_outlined),
-            onPressed: () {},
+            onPressed: () => sendTransaction(),
           ),
         ],
       ),

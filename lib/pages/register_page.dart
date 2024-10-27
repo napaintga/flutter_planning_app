@@ -9,7 +9,7 @@ import '../components/my_button.dart';
 import '../components/my_textfield.dart';
 import 'package:base_x/base_x.dart';
 import 'package:pointycastle/export.dart' as pc;
-
+import 'package:solana/solana.dart';
 
 
 
@@ -26,7 +26,6 @@ class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _usernamecontroller = TextEditingController();
   final TextEditingController _passwordcontroller = TextEditingController();
   final TextEditingController _confirmpasswordcontroller = TextEditingController();
-
   bool _isValid = false;
   String _errorMessage = '';
   String _recoveryPhrase = '';
@@ -59,120 +58,58 @@ class _RegisterPageState extends State<RegisterPage> {
   Future<String> _generateKey(String password) async {
     final algorithm = Ed25519();
 
-    // Генерація ключової пари
     final keyPair = await algorithm.newKeyPair();
     final privateKey = await keyPair.extractPrivateKeyBytes();
     final publicKey = await keyPair.extractPublicKey();
 
     const PREFIX = "ed25519:";
 
-    // Ініціалізація алфавіту Base58
     final base58Codec = BaseXCodec('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz');
 
-    // Кодування приватного та публічного ключів
     final privateKeyBase58 = PREFIX + base58Codec.encode(Uint8List.fromList(privateKey));
     final publicKeyBase58 = PREFIX + base58Codec.encode(Uint8List.fromList(publicKey.bytes));
 
     print("Private Key: $privateKeyBase58");
     print("Public Key: $publicKeyBase58");
 
-    // Параметри для PBKDF2
     const int iterationCount = 65536;
     const int keyLength = 32;
     const int saltLength = 16;
     const int ivLength = 12;
 
-    // Генеруємо сіль
     final salt = Uint8List.fromList(List<int>.generate(saltLength, (i) => Random.secure().nextInt(256)));
 
-    // Ініціалізація алгоритму PBKDF2 з HMAC SHA256
     final pbkdf2 = Pbkdf2(
       macAlgorithm: Hmac.sha256(),
       iterations: iterationCount,
-      bits: keyLength * 8, // Бітова довжина
+      bits: keyLength * 8,
     );
 
-    // Хешування пароля
     final secretKey = await pbkdf2.deriveKey(
       secretKey: SecretKey(utf8.encode(password)),
-      nonce: salt, // сіль використовується як nonce
+      nonce: salt,
     );
-
-    // Отримуємо байти хешу
     final passwordHash = await secretKey.extractBytes();
 
-    // Виводимо результати
     print('Salt: ${base64.encode(salt)}');
     print('Password Hash: ${base64.encode(passwordHash)}');
-
-    // Генеруємо випадковий nonce (IV)
     final nonce = Uint8List.fromList(List<int>.generate(ivLength, (i) => Random.secure().nextInt(256)));
-
-    // Ініціалізація шифру AES GCM
     final cipher = pc.GCMBlockCipher(pc.AESEngine())
       ..init(true, pc.AEADParameters(pc.KeyParameter(Uint8List.fromList(passwordHash)), 128, nonce, Uint8List(0)));
 
-    // Шифрування даних
     final plaintext = utf8.encode(privateKeyBase58);
     final encryptedData = cipher.process(Uint8List.fromList(plaintext));
 
-    // Генеруємо тег (tag)
     final tag = cipher.mac;
 
-    // Комбінуємо nonce, salt, encrypted data та tag для передачі
     final encryptedBytes = Uint8List.fromList(nonce + salt + encryptedData + tag);
 
-    // Закодуємо в Base64 для зберігання або передачі
     final encodedData = base64Encode(encryptedBytes);
 
     print('Зашифровані дані: $encodedData');
 
     return encodedData;
   }
-  // Future<String?> _decryptKey(String encodedData, String password) async {
-  //   // Декодуємо дані з Base64
-  //   final encryptedBytes = base64Decode(encodedData);
-  //
-  //   // Витягуємо nonce, salt, encrypted data та tag
-  //   final nonce = encryptedBytes.sublist(0, 12); // перші 12 байтів
-  //   final salt = encryptedBytes.sublist(12, 28); // наступні 16 байтів
-  //   final encryptedData = encryptedBytes.sublist(28, encryptedBytes.length - 16); // дані між nonce та тегом
-  //   final tag = encryptedBytes.sublist(encryptedBytes.length - 16); // останні 16 байтів
-  //
-  //   // Параметри для PBKDF2
-  //   const int iterationCount = 65536;
-  //   const int keyLength = 32;
-  //
-  //   // Ініціалізація алгоритму PBKDF2 з HMAC SHA256
-  //   final pbkdf2 = Pbkdf2(
-  //     macAlgorithm: Hmac.sha256(),
-  //     iterations: iterationCount,
-  //     bits: keyLength * 8, // Бітова довжина
-  //   );
-  //
-  //   // Хешування пароля з використанням сіль
-  //   final secretKey = await pbkdf2.deriveKey(
-  //     secretKey: SecretKey(utf8.encode(password)),
-  //     nonce: salt, // сіль використовується як nonce
-  //   );
-  //
-  //   // Отримуємо байти хешу
-  //   final passwordHash = await secretKey.extractBytes();
-  //
-  //   // Ініціалізація шифру AES GCM для розшифрування
-  //   final cipher = pc.GCMBlockCipher(pc.AESEngine())
-  //     ..init(false, pc.AEADParameters(pc.KeyParameter(Uint8List.fromList(passwordHash)), 128, nonce, Uint8List(0)));
-  //
-  //   // Розшифрування даних
-  //   final decryptedData = cipher.process(Uint8List.fromList(encryptedData));
-  //
-  //   // Перетворюємо байти назад в рядок
-  //   final decryptedKey = utf8.decode(decryptedData);
-  //
-  //   // Повертаємо розшифрований приватний ключ
-  //   return decryptedKey;
-  // }
-
 
   String _generateRecoveryPhrase() {
     final random = Random.secure();
