@@ -9,8 +9,6 @@ import '../components/my_button.dart';
 import '../components/my_textfield.dart';
 import 'package:base_x/base_x.dart';
 import 'package:pointycastle/export.dart' as pc;
-import 'package:solana/solana.dart';
-
 
 
 class RegisterPage extends StatefulWidget {
