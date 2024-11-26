@@ -1,13 +1,14 @@
-import 'dart:convert' ;
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:proecfxd/components/my_button.dart';
+import 'package:web3dart/credentials.dart';
 import './home_page.dart';
 import '../components/my_textfield.dart';
 import 'dart:typed_data';
 import 'package:pointycastle/export.dart' as pc;
-import 'package:cryptography/cryptography.dart';
+import 'package:cryptography/cryptography.dart' as cryptography;
 
 class LoginPage extends StatefulWidget {
   final void Function()? onTap;
@@ -24,41 +25,50 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernamecontroller = TextEditingController();
   final TextEditingController _passwordcontroller = TextEditingController();
+  final TextEditingController _privateKeyController = TextEditingController(); // Новий контролер
 
   bool _isLogin = false;
   String _errorMessageLogin = '';
 
-  Future<bool> login(String username, String password) async {
+  Future<bool> login(String username, String password, String? privateKey) async {
     setState(() {
       _errorMessageLogin = '';
     });
 
-    if (username.isEmpty || password.isEmpty) {
+    if (username.isEmpty || (password.isEmpty && privateKey == null)) {
       setState(() {
-        _errorMessageLogin = "Enter a username and password";
+        _errorMessageLogin = "Enter a username and either password or private key";
       });
       return false;
     }
 
-    final isValid = await readAndValidatePassword(username, password);
-
-    if (!isValid) {
-      setState(() {
-        _errorMessageLogin = "Invalid password";
-      });
-      print(_errorMessageLogin);
-      return false;
+    if (privateKey != null) {
+      final isValid = await validatePrivateKey(username, privateKey);
+      if (!isValid) {
+        setState(() {
+          _errorMessageLogin = "Invalid private key";
+        });
+        return false;
+      }
     } else {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => HomeScreen()),
-      );
+      final isValid = await readAndValidatePassword(username, password);
+      if (!isValid) {
+        setState(() {
+          _errorMessageLogin = "Invalid password";
+        });
+        return false;
+      }
     }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => HomeScreen()),
+    );
 
     return true;
   }
 
-  Future<bool> readAndValidatePassword(String username, String enteredPassword) async {
+  Future<bool> validatePrivateKey(String username, String privateKey) async {
     final directory = await getApplicationDocumentsDirectory();
     final filePath = '${directory.path}/${username}_keys.json';
     final file = File(filePath);
@@ -86,73 +96,152 @@ class _LoginPageState extends State<LoginPage> {
 
     String fileContent = await file.readAsString();
     final decodedJson = jsonDecode(fileContent);
+    final storedPrivateKey = decodedJson['privateKey'];
+
+    if (storedPrivateKey == privateKey) {
+      return true;
+    }
+
+    return false;
+  }
+
+  Future<bool> readAndValidatePassword(String username, String enteredPassword) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final filePath = '${directory.path}/${username}_key.json';
+    final file = File(filePath);
+
+    if (!await file.exists()) {
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: Text("Error"),
+            content: Text("No key file for this user."),
+            actions: <Widget>[
+              TextButton(
+                child: Text("OK"),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          );
+        },
+      );
+      return false;
+    }
+    String fileContent = await file.readAsString();
+    final decodedJson = jsonDecode(fileContent);
 
     final encrypted = decodedJson['privateKey'];
-    print("Encrypted Password: $encrypted");
-
-    // Decode Base64 string
+    print("Encrypted32 Private Key: $encrypted");
     Uint8List encryptedMessage = base64Decode(encrypted);
-    print("Raw Base64 Password: $encryptedMessage");
-
-    // Attempt to decrypt the private key
-    String? decryptedKey = await _decryptKey(encrypted, enteredPassword);
-
-    if (decryptedKey != null) {
-      print('Decrypted key: $decryptedKey');
-      return true; // Password is valid
+    print("Raw Base64 Private Key: $encryptedMessage");
+    final decryptedKey = await _decryptKey(enteredPassword,encrypted );
+    if (decryptedKey != null) { // Виконуємо перевірку, чи ключ існує
+      print('Decrypted key: ${decryptedKey.privateKey}');
+      return true;
     } else {
-      return false; // Invalid password
+      return false;
     }
   }
 
-  Future<String?> _decryptKey(String encodedData, String password) async {
-    try {
-      // Decode data from Base64
-      final encryptedBytes = base64Decode(encodedData);
+  Future<EthPrivateKey?> _decryptKey(String password, String encryptedData) async {
+    try{
+      final encryptedBytes = base64Decode(encryptedData);
+      const int saltLength = 16;
+      const int ivLength = 12;
+      const int tagLength = 16;
+      final nonce = encryptedBytes.sublist(0, ivLength);
+      final salt = encryptedBytes.sublist(ivLength, ivLength + saltLength);
+      final encryptedPayload = encryptedBytes.sublist(ivLength + saltLength, encryptedBytes.length - tagLength);
 
-      // Extract nonce, salt, encrypted data, and tag
-      final nonce = encryptedBytes.sublist(0, 12); // first 12 bytes
-      final salt = encryptedBytes.sublist(12, 28); // next 16 bytes
-      final encryptedData = encryptedBytes.sublist(28, encryptedBytes.length - 16); // data between nonce and tag
-      final tag = encryptedBytes.sublist(encryptedBytes.length - 16); // last 16 bytes
-
-      // Parameters for PBKDF2
       const int iterationCount = 65536;
       const int keyLength = 32;
 
-      // Initialize PBKDF2 with HMAC SHA256
-      final pbkdf2 = Pbkdf2(
-        macAlgorithm: Hmac.sha256(),
+      // Генерація ключа з пароля
+      final pbkdf2 = cryptography.Pbkdf2(
+        macAlgorithm: cryptography.Hmac.sha256(),
         iterations: iterationCount,
-        bits: keyLength * 8, // Bit length
+        bits: keyLength * 8,
       );
 
-      // Hash password using the salt
       final secretKey = await pbkdf2.deriveKey(
-        secretKey: SecretKey(utf8.encode(password)),
-        nonce: salt, // salt used as nonce
+        secretKey: cryptography.SecretKey(utf8.encode(password)),
+        nonce: salt,
       );
 
-      // Get hash bytes
       final passwordHash = await secretKey.extractBytes();
 
-      // Initialize AES GCM for decryption
       final cipher = pc.GCMBlockCipher(pc.AESEngine())
         ..init(false, pc.AEADParameters(pc.KeyParameter(Uint8List.fromList(passwordHash)), 128, nonce, Uint8List(0)));
+      final decryptedBytes = cipher.process(Uint8List.fromList(encryptedPayload));
 
-      // Decrypt data
-      final decryptedData = cipher.process(Uint8List.fromList(encryptedData));
-
-      // Convert bytes back to string
-      final decryptedKey = utf8.decode(decryptedData);
-
-      return decryptedKey; // Return decrypted private key
+      final privateKey = EthPrivateKey(Uint8List.fromList(decryptedBytes));
+      print("Decrypted Private Key: ${privateKey.privateKey}");
+      return privateKey;
     } catch (e) {
-      print('Decryption failed: $e');
-      return null;
-    }
+      print('Decryption error: $e');
+      return null;}
+
   }
 
+  void _showPrivateKeyDialog() {
+    final TextEditingController _keyController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text("Restore Access"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _keyController,
+                decoration: InputDecoration(
+                  labelText: "Enter Private Key",
+                  hintText: "Private Key",
+                  icon: Icon(Icons.lock),
+                ),
+                obscureText: true,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () async {
+                final privateKey = _keyController.text;
+                if (privateKey.isNotEmpty) {
+                  final isValid = await validatePrivateKey(_usernamecontroller.text, privateKey);
+                  if (isValid) {
+                    Navigator.of(context).pop(); // Close dialog
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (context) => HomeScreen()),
+                    );
+                  } else {
+                    // Show error message
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text("Invalid Private Key"),
+                      backgroundColor: Colors.red,
+                    ));
+                  }
+                }
+              },
+              child: Text("Restore"),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -225,14 +314,35 @@ class _LoginPageState extends State<LoginPage> {
                       text: "LOGIN",
                       onPressed: () async {
                         // Asynchronous call outside of setState
-                        final isLogin = await login(_usernamecontroller.text, _passwordcontroller.text);
+                        final isLogin = await login(
+                          _usernamecontroller.text,
+                          _passwordcontroller.text,
+                          _privateKeyController.text.isNotEmpty ? _privateKeyController.text : null,
+                        );
 
                         setState(() {
                           _isLogin = isLogin;
                         });
                       },
                     ),
-                    const SizedBox(height: 30),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        GestureDetector(
+                          onTap: _showPrivateKeyDialog,
+                          child: Text(
+                            "Restore Access",
+                            style: TextStyle(
+                              color: Color.fromRGBO(73, 102, 151, 1.0),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -243,7 +353,7 @@ class _LoginPageState extends State<LoginPage> {
                           child: const Text(
                             "Register now",
                             style: TextStyle(
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w500,
                               color: Color.fromRGBO(73, 102, 151, 1.0),
                             ),
                           ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class MyButton extends StatelessWidget {
+class MyButton extends ConsumerStatefulWidget {
   final String text;
   final Function() onPressed;
 
@@ -10,6 +11,11 @@ class MyButton extends StatelessWidget {
     required this.onPressed,
   } );
 
+  @override
+  ConsumerState<MyButton> createState() => _MyButtonState();
+}
+
+class _MyButtonState extends ConsumerState<MyButton> {
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -21,8 +27,8 @@ class MyButton extends StatelessWidget {
             backgroundColor: const Color.fromRGBO(73, 102, 151, 1.0),
             foregroundColor: Colors.white,
           ) ,
-            onPressed: onPressed,
-            child: Text(text)
+            onPressed: widget.onPressed,
+            child: Text(widget.text)
         )
       ],
     );

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class MyTextfield extends StatelessWidget {
+class MyTextfield extends ConsumerStatefulWidget {
   final String hintText;
   final Icon icon;
   final TextEditingController controller;
@@ -14,16 +15,21 @@ class MyTextfield extends StatelessWidget {
   });
 
   @override
+  ConsumerState<MyTextfield> createState() => _MyTextfieldState();
+}
+
+class _MyTextfieldState extends ConsumerState<MyTextfield> {
+  @override
   Widget build(BuildContext context) {
     return TextField(
-      controller: controller,
-      obscureText: obsecureText,
+      controller: widget.controller,
+      obscureText: widget.obsecureText,
       decoration: InputDecoration(
-        hintText:hintText,
+        hintText:widget.hintText,
         hintStyle: TextStyle(
           color: Colors.grey.shade900,
         ),
-        prefixIcon:icon,
+        prefixIcon:widget.icon,
         prefixIconColor: Colors.grey.shade900,
 
         enabledBorder: UnderlineInputBorder(

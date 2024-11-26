@@ -9,6 +9,7 @@ class TaskListCard extends StatefulWidget {
     required this.hour,
     required this.isChecked,
     required this.saveChecked,
+    required this.CustomDialog,
 
   });
 
@@ -17,6 +18,7 @@ class TaskListCard extends StatefulWidget {
   final String hour;
   final bool isChecked;
   final Function() saveChecked;
+  final Function(BuildContext) CustomDialog;
 
 
   @override
@@ -49,8 +51,10 @@ class _TaskListCardState extends State<TaskListCard> {
       ),
       child: Row(
         children: [
-          Icon(Icons.checklist_outlined),
-          const SizedBox(width: 10),
+          IconButton(
+            icon: Icon(Icons.more_vert),
+            onPressed: () => widget.CustomDialog(context),
+          ),
 
           Column(
             mainAxisAlignment: MainAxisAlignment.center,

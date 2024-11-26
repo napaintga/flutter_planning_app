@@ -7,7 +7,19 @@ import '../pages/home_page.dart';
 import '../pages/profile.dart';
 
 
-class MyBottomAppBar extends StatelessWidget {
+class MyBottomAppBar extends StatefulWidget {
+
+  final Function() onPressed;
+
+  const MyBottomAppBar ({
+    super.key,
+    required this.onPressed,
+  } );
+  @override
+  State<MyBottomAppBar> createState() => _MyBottomAppBarState();
+}
+
+class _MyBottomAppBarState extends State<MyBottomAppBar> {
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +42,7 @@ class MyBottomAppBar extends StatelessWidget {
           IconButton(
             tooltip: 'cached',
             icon: const Icon(Icons.cached_outlined),
-            onPressed: () {},
+            onPressed: widget.onPressed
           ),
           IconButton(
             tooltip: 'Profile',
@@ -38,17 +50,20 @@ class MyBottomAppBar extends StatelessWidget {
             onPressed: () {
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(builder: (context) => SolanaWallet()),
+                MaterialPageRoute(builder: (context) => TestPage()),
               );
             },
           ),
+
           IconButton(
             tooltip: 'Profile',
             icon: const Icon(Icons.task_alt_outlined),
             onPressed: () {
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(builder: (context) => HomeScreen()),
+                  MaterialPageRoute(
+                    builder: (context) => HomeScreen(),
+                  )
               );
             },
           ),

@@ -1,37 +1,59 @@
 import 'dart:convert';
-import 'dart:math';
-import 'dart:typed_data';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:cryptography/cryptography.dart';
-import '../components/my_button.dart';
-import '../components/my_textfield.dart';
-import 'package:base_x/base_x.dart';
+import 'package:web3dart/web3dart.dart';
+import 'package:http/http.dart' as http;
+import 'dart:typed_data';
+import 'package:cryptography/cryptography.dart' as cryptography;
 import 'package:pointycastle/export.dart' as pc;
+import '../components/my_button.dart';
+import '../constants.dart';
+import 'package:proecfxd/service/contract_service.dart';
 
+class RegisterPage extends ConsumerStatefulWidget {
+  final VoidCallback onTap;
+  final ContractService contractServiceTask;
 
-class RegisterPage extends StatefulWidget {
-  final void Function()? onTap;
-
-  const RegisterPage({super.key, required this.onTap});
+  const RegisterPage({
+    Key? key,
+    required this.onTap,
+    required this.contractServiceTask,
+  }) : super(key: key);
 
   @override
-  State<RegisterPage> createState() => _RegisterPageState();
+  ConsumerState<RegisterPage >createState() => _RegisterPageState();
 }
 
-class _RegisterPageState extends State<RegisterPage> {
+class _RegisterPageState extends ConsumerState<RegisterPage> {
   final TextEditingController _usernamecontroller = TextEditingController();
   final TextEditingController _passwordcontroller = TextEditingController();
   final TextEditingController _confirmpasswordcontroller = TextEditingController();
   bool _isValid = false;
   String _errorMessage = '';
   String _recoveryPhrase = '';
+  String _ethereumAddress = '';
 
-  bool _validatePassword(String password, String confirmpassword) {
+  Future<bool> _register(String userName, String userAddress) async {
+    final contractService = ref.read(ContractService.provider);
+
+    try {
+      await contractService.registerUser(userName, userAddress);
+      return true;
+    } catch (e) {
+      print("Error registering user: $e");
+      throw Exception("Registration failed: $e");
+    }
+  }
+
+  bool _validatePassword(String password, String confirmpassword,String username) {
     _errorMessage = '';
+    if (username.isEmpty){
+      _errorMessage += " Enter a username.";
 
-    if (password.isEmpty) {
+    } else if (password.isEmpty) {
       _errorMessage += " Enter a password.";
     } else if (password.length < 8) {
       _errorMessage += ' Password must be longer than 8 characters.';
@@ -46,30 +68,31 @@ class _RegisterPageState extends State<RegisterPage> {
     } else if (password != confirmpassword) {
       _errorMessage += ' Those passwords didn’t match. Try again.';
     }
-
     return _errorMessage.isEmpty;
   }
 
-
-
-
   Future<String> _generateKey(String password) async {
-    final algorithm = Ed25519();
+    final credentials = await _generateEthereumCredentials(password);
+    final address = credentials.address;
+    _ethereumAddress = address.hex;
 
-    final keyPair = await algorithm.newKeyPair();
-    final privateKey = await keyPair.extractPrivateKeyBytes();
-    final publicKey = await keyPair.extractPublicKey();
+    print("Ethereum Address: $address");
+    print("Private Key: ${credentials.privateKey}");
+    final encryptedPrivateKey = await _encryptPrivateKey(password, credentials);
 
-    const PREFIX = "ed25519:";
+    return encryptedPrivateKey;
+  }
 
-    final base58Codec = BaseXCodec('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz');
+  Future<EthPrivateKey> _generateEthereumCredentials(String password) async {
+    final rpcUrl = Constants.RPC_URL;
+    final ethClient = Web3Client(rpcUrl, http.Client());
+    final credentials = await ethClient.credentialsFromPrivateKey(Constants.PRIVATE_KEY);
+    return credentials;
+  }
 
-    final privateKeyBase58 = PREFIX + base58Codec.encode(Uint8List.fromList(privateKey));
-    final publicKeyBase58 = PREFIX + base58Codec.encode(Uint8List.fromList(publicKey.bytes));
 
-    print("Private Key: $privateKeyBase58");
-    print("Public Key: $publicKeyBase58");
-
+  Future<String> _encryptPrivateKey(String password, EthPrivateKey privateKey) async {
+    final privateKeyBytes = privateKey.privateKey;
     const int iterationCount = 65536;
     const int keyLength = 32;
     const int saltLength = 16;
@@ -77,81 +100,103 @@ class _RegisterPageState extends State<RegisterPage> {
 
     final salt = Uint8List.fromList(List<int>.generate(saltLength, (i) => Random.secure().nextInt(256)));
 
-    final pbkdf2 = Pbkdf2(
-      macAlgorithm: Hmac.sha256(),
+    final pbkdf2 = cryptography.Pbkdf2(
+      macAlgorithm: cryptography.Hmac.sha256(),
       iterations: iterationCount,
       bits: keyLength * 8,
     );
 
     final secretKey = await pbkdf2.deriveKey(
-      secretKey: SecretKey(utf8.encode(password)),
+      secretKey: cryptography.SecretKey(utf8.encode(password)),
       nonce: salt,
     );
+
     final passwordHash = await secretKey.extractBytes();
 
-    print('Salt: ${base64.encode(salt)}');
-    print('Password Hash: ${base64.encode(passwordHash)}');
     final nonce = Uint8List.fromList(List<int>.generate(ivLength, (i) => Random.secure().nextInt(256)));
+
     final cipher = pc.GCMBlockCipher(pc.AESEngine())
       ..init(true, pc.AEADParameters(pc.KeyParameter(Uint8List.fromList(passwordHash)), 128, nonce, Uint8List(0)));
 
-    final plaintext = utf8.encode(privateKeyBase58);
-    final encryptedData = cipher.process(Uint8List.fromList(plaintext));
-
+    final encryptedData = cipher.process(Uint8List.fromList(privateKeyBytes));
     final tag = cipher.mac;
-
     final encryptedBytes = Uint8List.fromList(nonce + salt + encryptedData + tag);
-
     final encodedData = base64Encode(encryptedBytes);
-
-    print('Зашифровані дані: $encodedData');
+    print('Encrypted Data: $encodedData');
 
     return encodedData;
   }
 
-  String _generateRecoveryPhrase() {
-    final random = Random.secure();
-    const wordList = [
-      'apple', 'orange', 'banana', 'grape', 'lemon', 'mango', 'peach', 'pear',
-      'plum', 'berry', 'melon', 'kiwi', 'cherry', 'fig', 'date', 'apricot',
-      'lime', 'coconut', 'blueberry', 'raspberry'
-    ];
-    List<String> phrase = [];
-    for (int i = 0; i < 12; i++) {
-      phrase.add(wordList[random.nextInt(wordList.length)]);
-    }
-    return phrase.join(' ');
+  Future<EthPrivateKey> _decryptPrivateKey(String password, String encryptedData) async {
+    final encryptedBytes = base64Decode(encryptedData); // Декодування Base64
+    const int saltLength = 16; // Довжина солі
+    const int ivLength = 12; // Довжина nonce
+    const int tagLength = 16; // Довжина MAC
+
+    // Розділення даних
+    final nonce = encryptedBytes.sublist(0, ivLength);
+    final salt = encryptedBytes.sublist(ivLength, ivLength + saltLength);
+    final encryptedPayload = encryptedBytes.sublist(ivLength + saltLength, encryptedBytes.length - tagLength);
+
+    const int iterationCount = 65536;
+    const int keyLength = 32;
+
+    final pbkdf2 = cryptography.Pbkdf2(
+      macAlgorithm: cryptography.Hmac.sha256(),
+      iterations: iterationCount,
+      bits: keyLength * 8,
+    );
+
+    final secretKey = await pbkdf2.deriveKey(
+      secretKey: cryptography.SecretKey(utf8.encode(password)),
+      nonce: salt,
+    );
+    final passwordHash = await secretKey.extractBytes();
+    final cipher = pc.GCMBlockCipher(pc.AESEngine())
+      ..init(false, pc.AEADParameters(pc.KeyParameter(Uint8List.fromList(passwordHash)), 128, nonce, Uint8List(0)));
+    final decryptedBytes = cipher.process(Uint8List.fromList(encryptedPayload));
+    final privateKey = EthPrivateKey(Uint8List.fromList(decryptedBytes));
+
+    print("Decrypted Private Key: ${privateKey.privateKey}");
+
+    return privateKey;
   }
 
-  Future<void> _saveKeys(String encryptedPrivateKey ) async {
 
 
-    // String encodedData = await _generateKey('mytestpassword');
-    // String? decryptedKey = await _decryptKey(encodedData, 'mytestpassword');
-    //
-    // if (decryptedKey != null) {
-    //   print('Розшифрований ключ: $decryptedKey');
-    // } else {
-    //   print('Не вдалося розшифрувати ключ.');
-    // }
+
+  Future<void> _saveKeys(String encryptedPrivateKey) async {
     final directory = await getApplicationDocumentsDirectory();
     final username = _usernamecontroller.text;
 
     final filePath = '${directory.path}/${username}_keys.json';
     final file = File(filePath);
-    print(filePath);
     final jsonContent = jsonEncode({
       "username": _usernamecontroller.text,
       "privateKey": encryptedPrivateKey,
+      "ethereumAddress": _ethereumAddress,
       "recoveryPhrase": _recoveryPhrase,
-      "pas":_passwordcontroller.text,
+      "password": _passwordcontroller.text,
+    });
+    await file.writeAsString(jsonContent);
+
+    final filePath_key = '${directory.path}/${username}_key.json';
+    final file_key = File(filePath_key);
+    final jsonContent_key = jsonEncode({
+      "privateKey": encryptedPrivateKey,
     });
 
-    await file.writeAsString(jsonContent);
+    await file_key.writeAsString(jsonContent_key);
   }
 
-
-
+  String _generateRecoveryPhrase() {
+    const phrases = [
+      "apple", "banana", "grape", "orange", "peach", "kiwi", "cherry", "melon", "pear", "plum"
+    ];
+    final random = Random();
+    final recoveryPhrase = List.generate(12, (_) => phrases[random.nextInt(phrases.length)]).join(' ');
+    return recoveryPhrase;
+  }
 
   void _showRecoveryDialog(BuildContext context) {
     showDialog(
@@ -159,7 +204,9 @@ class _RegisterPageState extends State<RegisterPage> {
       builder: (context) => AlertDialog(
         title: const Text("Recovery Phrase"),
         content: Text(
-          "Please save the following recovery phrase in a safe place:\n\n$_recoveryPhrase",
+          "Please save the following recovery phrase and Ethereum address in a safe place:\n\n"
+              "$_recoveryPhrase\n\n"
+              "Ethereum Address: $_ethereumAddress",
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
@@ -176,6 +223,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
+
     return Scaffold(
       body: SafeArea(
         child: Container(
@@ -192,25 +240,30 @@ class _RegisterPageState extends State<RegisterPage> {
                       style: TextStyle(fontSize: 28, fontWeight: FontWeight.w300),
                     ),
                     const SizedBox(height: 50),
-                    MyTextfield(
-                      hintText: "USER NAME",
-                      icon: const Icon(Icons.mail_outline),
+                    TextField(
                       controller: _usernamecontroller,
-                      obsecureText: false,
+                      decoration: InputDecoration(
+                        labelText: 'USER NAME',
+                        prefixIcon: const Icon(Icons.mail_outline),
+                      ),
                     ),
                     const SizedBox(height: 15),
-                    MyTextfield(
-                      hintText: "PASSWORD",
-                      icon: const Icon(Icons.lock_outline),
+                    TextField(
                       controller: _passwordcontroller,
-                      obsecureText: true,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText: 'PASSWORD',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                      ),
                     ),
                     const SizedBox(height: 15),
-                    MyTextfield(
-                      hintText: "CONFIRM PASSWORD",
-                      icon: const Icon(Icons.lock_outline),
+                    TextField(
                       controller: _confirmpasswordcontroller,
-                      obsecureText: true,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText: 'CONFIRM PASSWORD',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                      ),
                     ),
                     const SizedBox(height: 5),
                     Row(
@@ -237,63 +290,67 @@ class _RegisterPageState extends State<RegisterPage> {
                       ],
                     ),
                     const SizedBox(height: 30),
-// Assuming you have a method to generate or retrieve the publicKey
 
-                MyButton(
-                text: "REGISTER",
-                onPressed: () async { // Mark the callback as async
-                  setState(() {
-                    _isValid = _validatePassword(
-                        _passwordcontroller.text,
-                        _confirmpasswordcontroller.text
-                    );
-                  });
+                    MyButton(
+                      text: "REGISTER",
+                      onPressed: () async {
+                        setState(() {
+                          _isValid = _validatePassword(
+                            _passwordcontroller.text,
+                            _confirmpasswordcontroller.text,
+                              _usernamecontroller.text,
+                          );
+                        });
 
-                  if (_isValid) {
-                    _recoveryPhrase = _generateRecoveryPhrase();
-                    _showRecoveryDialog(context);
-                    final password = _passwordcontroller.text;
-
-                    try {
-                      final privateKey = await _generateKey(password);
-
-                      _saveKeys(privateKey);
-
-                        ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("Keys and recovery phrase saved successfully!")),
-                      );
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("Failed to save keys: $e")),
-                      );
-                    }
-                  }
-                },
-              ),
+                        if (_isValid) {
+                          final password = _passwordcontroller.text;
 
 
-                    const SizedBox(height: 30),
+                          try {
+                            final encryptedPrivateKey = await _generateKey(password);
+                            final isRegistered = await _register(
+                              _usernamecontroller.text,
+                              _ethereumAddress,
+                            );
+                            print(isRegistered);
+                            if (isRegistered) {
+                              await _saveKeys(encryptedPrivateKey);
+                              _recoveryPhrase = _generateRecoveryPhrase();
+                              _showRecoveryDialog(context);
+                            }
+                          } catch (e) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content:const Text("User already registered."),
+                                behavior: SnackBarBehavior.floating,
+                                backgroundColor: const Color.fromRGBO(
+                                    136, 13, 13, 1.0),
+                              ),
+                            );
+                          }
+                        }
+                      }
+                    ),
+                    const SizedBox(height: 50),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Text("Already have an account?"),
-                        const SizedBox(width: 4),
+                        const Text("Already a member? "),
                         GestureDetector(
                           onTap: widget.onTap,
                           child: const Text(
                             "Login now",
                             style: TextStyle(
-                              color: Colors.blue,
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w500,
+                              color: Color.fromRGBO(73, 102, 151, 1.0),
                             ),
                           ),
-                        )
+                        ),
                       ],
-                    )
+                    ),
                   ],
                 ),
-              )
+              ),
             ],
           ),
         ),
@@ -301,4 +358,3 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 }
-

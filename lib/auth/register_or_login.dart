@@ -2,6 +2,7 @@ import 'package:flutter/material.dart' show BuildContext, State, StatefulWidget,
 import 'package:proecfxd/pages/register_page.dart';
 
 import '../pages/login_page.dart';
+import '../service/contract_service.dart';
 
 
 
@@ -30,7 +31,10 @@ class _LoginOrRegisterState extends State<LoginOrRegister>{
       return LoginPage(onTap: toggle_pages);
     }
     else{
-      return RegisterPage(onTap: toggle_pages);
+      final contractServiceTask = ContractService();
+
+      return RegisterPage(onTap: toggle_pages,  contractServiceTask: contractServiceTask,
+      );
     }
   }
 }
